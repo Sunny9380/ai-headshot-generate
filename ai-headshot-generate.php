@@ -1538,58 +1538,104 @@
             faceStatus.className = "face-status";
             captureBtn.disabled = true;
 
+            // Stabilization variables to reduce flickering messages
+            let lastStatus = '';
+            let lastStatusType = '';
+            let stableFrameCount = 0;
+            let noFaceFrameCount = 0;
+            const STABLE_THRESHOLD = 5; // Frames needed to confirm status change
+            const NO_FACE_THRESHOLD = 10; // Frames before showing "no face" error
+
             tracker.on('track', function(event) {
                 overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
                 
                 if (event.data.length === 0) {
-                    updateStatus("No face detected. Please look at the camera.", "error");
-                    captureBtn.disabled = true;
-                } else {
-                    const face = event.data[0];
-                    const vidWidth = video.videoWidth;
-                    const vidHeight = video.videoHeight;
-
-                    // Draw Bounding Box
-                    overlayCtx.strokeStyle = '#34d399';
-                    overlayCtx.lineWidth = 4;
-                    overlayCtx.strokeRect(face.x, face.y, face.width, face.height);
-                    
-                    // Validation Parameters
-                    const margin = 20; // Minimum distance from edges
-                    const minWidth = vidWidth * 0.15; // Face must be at least 15% of screen width
-                    
-                    // Check 1: Edges (Ensure full head/hair is likely in frame)
-                    if (face.x < margin || face.y < margin || (face.x + face.width) > (vidWidth - margin)) {
-                        updateStatus("Too close to edge! Center your face.", "warning");
-                        overlayCtx.strokeStyle = '#fbbf24';
-                        overlayCtx.strokeRect(face.x, face.y, face.width, face.height);
+                    noFaceFrameCount++;
+                    // Only show "no face" after several consecutive frames without detection
+                    if (noFaceFrameCount > NO_FACE_THRESHOLD) {
+                        if (lastStatus !== 'no_face') {
+                            updateStatus("No face detected. Please look at the camera.", "error");
+                            lastStatus = 'no_face';
+                            lastStatusType = 'error';
+                        }
                         captureBtn.disabled = true;
-                        return;
                     }
+                    stableFrameCount = 0;
+                    return;
+                }
+                
+                // Face detected - reset no face counter
+                noFaceFrameCount = 0;
+                
+                const face = event.data[0];
+                const vidWidth = video.videoWidth;
+                const vidHeight = video.videoHeight;
 
-                    // Check 2: Size (Too far or too close)
-                    if (face.width < minWidth) {
-                        updateStatus("Move closer.", "warning");
-                        overlayCtx.strokeStyle = '#fbbf24';
-                        overlayCtx.strokeRect(face.x, face.y, face.width, face.height);
-                        captureBtn.disabled = true;
-                        return;
-                    }
-
-                    // Check 3: Centering (Roughly center)
+                // Validation Parameters (relaxed thresholds)
+                const margin = 15; // Reduced margin for more tolerance
+                const minWidth = vidWidth * 0.12; // Reduced minimum face size requirement
+                const centerTolerance = vidWidth * 0.30; // Increased center tolerance
+                
+                let currentStatus = 'perfect';
+                let statusMsg = "Perfect! Hold still.";
+                let statusType = 'success';
+                let boxColor = '#34d399';
+                
+                // Check 1: Edges (relaxed check)
+                if (face.x < margin || face.y < margin || (face.x + face.width) > (vidWidth - margin)) {
+                    currentStatus = 'edge';
+                    statusMsg = "Move slightly away from edge";
+                    statusType = 'warning';
+                    boxColor = '#fbbf24';
+                }
+                // Check 2: Size (too small/far)
+                else if (face.width < minWidth) {
+                    currentStatus = 'far';
+                    statusMsg = "Move a bit closer";
+                    statusType = 'warning';
+                    boxColor = '#fbbf24';
+                }
+                // Check 3: Centering (relaxed)
+                else {
                     const faceCenter = face.x + (face.width / 2);
                     const screenCenter = vidWidth / 2;
-                    if (Math.abs(faceCenter - screenCenter) > (vidWidth * 0.25)) {
-                         updateStatus("Center your face.", "warning");
-                         overlayCtx.strokeStyle = '#fbbf24';
-                         overlayCtx.strokeRect(face.x, face.y, face.width, face.height);
-                         captureBtn.disabled = true;
-                         return;
+                    if (Math.abs(faceCenter - screenCenter) > centerTolerance) {
+                        currentStatus = 'center';
+                        statusMsg = "Center your face a bit more";
+                        statusType = 'warning';
+                        boxColor = '#fbbf24';
                     }
-
-                    updateStatus("Perfect! Hold still.", "success");
-                    captureBtn.disabled = false;
                 }
+                
+                // Draw bounding box
+                overlayCtx.strokeStyle = boxColor;
+                overlayCtx.lineWidth = 4;
+                overlayCtx.strokeRect(face.x, face.y, face.width, face.height);
+                
+                // Stabilization: only update status after consistent detection
+                if (currentStatus === lastStatus) {
+                    stableFrameCount++;
+                } else {
+                    stableFrameCount = 1;
+                }
+                
+                // For "perfect" status, enable capture immediately but wait for stable message
+                if (currentStatus === 'perfect') {
+                    captureBtn.disabled = false;
+                    if (stableFrameCount >= 2 && (lastStatusType !== 'success')) {
+                        updateStatus(statusMsg, statusType);
+                        lastStatusType = statusType;
+                    }
+                } else {
+                    // For warnings, only show after several stable frames to avoid flickering
+                    if (stableFrameCount >= STABLE_THRESHOLD && lastStatus !== currentStatus) {
+                        updateStatus(statusMsg, statusType);
+                        lastStatusType = statusType;
+                    }
+                    captureBtn.disabled = true;
+                }
+                
+                lastStatus = currentStatus;
             });
 
             trackerTask = tracking.track('#video', tracker);
