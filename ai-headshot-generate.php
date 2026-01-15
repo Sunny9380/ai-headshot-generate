@@ -1409,11 +1409,13 @@
         });
 
         prevItem.addEventListener('click', function() {
-            currentIndex = Math.max(0, currentIndex - 1);
+            if (currentClothingList.length === 0) return;
+            currentIndex = (currentIndex - 1 + currentClothingList.length) % currentClothingList.length;
             renderGallery();
         });
         nextItem.addEventListener('click', function() {
-            currentIndex = Math.min(currentClothingList.length - 1, currentIndex + 1);
+            if (currentClothingList.length === 0) return;
+            currentIndex = (currentIndex + 1) % currentClothingList.length;
             renderGallery();
         });
 
@@ -1729,8 +1731,15 @@
             // Check if surprise mode is selected
             if (clothingFilename === 'SURPRISE_MODE') {
                 surpriseMode = true;
-                // Don't pick random here, let backend handle it
-                clothingFilename = '';
+                // Pick a random item from current category only (exclude the surprise item itself)
+                const availableItems = currentClothingList.filter(item => !item.isSurprise && !item.isSame);
+                if (availableItems.length > 0) {
+                    const randomItem = availableItems[Math.floor(Math.random() * availableItems.length)];
+                    const parts = randomItem.img.split('/');
+                    clothingFilename = parts[parts.length - 1];
+                } else {
+                    clothingFilename = '';
+                }
             }
             
             const formData = new FormData();
